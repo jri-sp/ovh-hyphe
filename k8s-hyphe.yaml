@@ -1,0 +1,243 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: archives
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: config
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-data
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: traph-data
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      name: mongo
+      labels:
+        app: mongo
+    spec:
+      containers:
+      - image: mongo:3.0
+        name: mongo
+        volumeMounts:
+        - mountPath: /data/db
+          name: mongo-data
+      restartPolicy: Always
+      volumes:
+      - name: mongo-data
+        persistentVolumeClaim:
+          claimName: mongo-data
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: mongo
+spec:
+  selector:
+    app: mongo
+  ports:
+  - port: 27017
+    targetPort: 27017
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crawler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crawler
+  template:
+    metadata:
+      name: crawler
+      labels:
+        app: crawler
+    spec:
+      containers:
+      - image: scpomedialab/hyphe_crawler:prod
+        name: crawler
+      restartPolicy: Always
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: crawler
+spec:
+  selector:
+    app: crawler
+  ports:
+  - port: 6800
+    targetPort: 6800
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      name: backend
+      labels:
+        app: backend
+    spec:
+      containers:
+      - env:
+        - name: HYPHE_CRAWLER_HOST
+          value: crawler
+        - name: HYPHE_CREATION_RULES
+          value: '{"twitter.com": "path-1", "twitter.com/hashtag": "path-2", "facebook.com":
+            "path-1", "facebook.com/pages": "path-2", "plus.google.com": "path-1", "linkedin.com":
+            "path-2", "viadeo.com/user": "path-2", "ello.co": "path-1", "pinterest.com":
+            "path-1", "over-blog.com": "subdomain", "tumblr.com": "subdomain", "wordpress.com":
+            "subdomain", "vimeo.com/user": "path-2", "dailymotion.com/user": "path-2",
+            "youtube.com/user": "path-2"}'
+        - name: HYPHE_DEBUG
+          value: "1"
+        - name: HYPHE_DEFAULT_CREATION_RULE
+          value: domain
+        - name: HYPHE_DEFAULT_STARTPAGES_MODE
+          value: '["prefixes", "pages-5"]'
+        - name: HYPHE_DOWNLOAD_DELAY
+          value: "0.5"
+        - name: HYPHE_FOLLOW_REDIRECTS
+          value: '["bit.ly", "t.co", "tinyurl.com", "goo.gl", "fb.me", "on.fb.me", "l.facebook.com",
+            "www.facebook.com/l.php", "ur1.ca", "j.mp", "wp.me", "ow.ly"]'
+        - name: HYPHE_HOST_MAX_SIM_REQ
+          value: "1"
+        - name: HYPHE_MAXDEPTH
+          value: "3"
+        - name: HYPHE_MAX_SIM_REQ
+          value: "24"
+        - name: HYPHE_MONGODB_HOST
+          value: mongo
+        - name: HYPHE_STORE_CRAWLED_HTML
+          value: "true"
+        - name: HYPHE_TRAPH_DATAPATH
+          value: /app/traph-data
+        - name: HYPHE_TRAPH_KEEPALIVE
+          value: "1800"
+        - name: HYPHE_TRAPH_MAX_SIM_PAGES
+          value: "250"
+        image: scpomedialab/hyphe_backend:prod
+        name: backend
+        volumeMounts:
+        - mountPath: /app/config
+          name: config
+        - mountPath: /app/archives
+          name: archives
+        - mountPath: /app/traph-data
+          name: traph-data
+      restartPolicy: Always
+      volumes:
+      - name: config
+        persistentVolumeClaim:
+          claimName: config
+      - name: archives
+        persistentVolumeClaim:
+          claimName: archives
+      - name: traph-data
+        persistentVolumeClaim:
+          claimName: traph-data
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: backend
+spec:
+  selector:
+    app: backend
+  ports:
+  - port: 6978
+    targetPort: 6978
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  labels:
+    app: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      name: frontend
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - env:
+        - name: HYPHE_BROWSER_URL
+          value: https://github.com/medialab/hyphe-browser/releases
+        - name: BACKEND_HOST
+          value: backend.default.svc.cluster.local
+        image: scpomedialab/hyphe_frontend:prod
+        name: frontend
+        ports:
+        - containerPort: 80
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: public-frontend
+spec:
+  selector:
+    app: frontend
+  ports:
+  - protocol: "TCP"
+    port: 80
+    targetPort: 80
+    name: http
+  type: LoadBalancer
