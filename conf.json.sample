@@ -1,0 +1,5 @@
+{
+    "tenantId": "your tenant ID",
+    "username": "your Openstack user ID",
+    "password": "you Openstack user password"
+}
